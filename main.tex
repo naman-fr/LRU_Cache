@@ -1,0 +1,231 @@
+% best_solution_lru_scheduler_improved.tex
+\documentclass[11pt,a4paper]{article}
+
+%% Typography & layout
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{geometry}
+\geometry{margin=1in}
+\setlength{\parskip}{0.9ex}
+\setlength{\parindent}{0pt}
+
+%% Packages for visuals and code
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{tcolorbox}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{listings}
+\usepackage{xcolor}
+
+%% Color palette (subtle)
+\definecolor{accent}{HTML}{0B6FA4}
+\definecolor{dark}{HTML}{222222}
+\definecolor{shade}{HTML}{F6F9FC}
+
+%% Header / footer
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\textsc{Data Structures \& Systems Design — Assignment}}
+\rhead{\textsc{Naman Gautam}}
+\cfoot{\thepage}
+
+%% Section title style
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}{\normalsize\itshape}{\thesubsubsection}{1em}{}
+
+%% listings configuration
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  numbers=left,
+  numberstyle=\tiny,
+  frame=single,
+  rulecolor=\color{gray},
+  backgroundcolor=\color{shade},
+  xleftmargin=4pt,
+  captionpos=b
+}
+
+%% Tcolorbox styles
+\tcbset{
+  mybox/.style={
+    colback=shade, colframe=accent, boxrule=0.6pt, arc=3pt, leftrule=0.6mm, rightrule=0.6mm,
+    top=2pt, bottom=2pt, left=4pt, right=4pt
+  },
+  summary/.style={mybox, fonttitle=\bfseries}
+}
+
+%% Document metadata
+\title{\vspace{-12pt}\textbf{LRU Cache \& Event Scheduler} \\ \large Production-grade solutions — algorithms, analysis, and code}
+\author{Naman Gautam \\ SE Intern Submission}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{tcolorbox}[summary,title=Executive summary]
+This report contains production-quality solutions for two tasks:
+\begin{enumerate}[noitemsep,leftmargin=*]
+  \item An \textbf{O(1)} LRU cache implemented using \texttt{std::unordered\_map} + \texttt{std::list}, with rationale and complexity analysis.
+  \item An event scheduler with functions to test attendability, compute minimum rooms required, and assign concrete room indices using a heap-based greedy algorithm.
+\end{enumerate}
+Appendices include full, compilable C++ source files and a minimal test harness.
+\end{tcolorbox}
+
+\vspace{4pt}
+\tableofcontents
+\thispagestyle{empty}
+\newpage
+
+\section{Problem statements (concise)}
+\subsection{LRU Cache}
+Implement a fixed-capacity cache that supports:
+\begin{itemize}
+  \item \texttt{int get(int key)} — returns the value or \texttt{-1} if missing; marks the key most-recently-used.
+  \item \texttt{void put(int key,int value)} — inserts or updates; evicts the least-recently-used item if capacity is exceeded.
+\end{itemize}
+Both operations must be amortized \(O(1)\).
+
+\subsection{Event Scheduler}
+Given a list of intervals \((\text{start},\text{end})\):
+\begin{itemize}
+  \item \texttt{can\_attend\_all(events)}: return \texttt{true} if no overlapping intervals exist (adjacent allowed).
+  \item \texttt{min\_rooms\_required(events)}: compute the minimum number of rooms required to host all events concurrently.
+  \item \texttt{assignRooms(events)}: (optional) produce integer room assignments for each event such that no overlapping events share a room.
+\end{itemize}
+
+\section{Design overview \& justification}
+\subsection{LRU cache — data structures choice}
+To achieve \(O(1)\) for both operations:
+\begin{itemize}
+  \item Use an \texttt{unordered\_map<key, iterator>} for constant-time lookup from key to its node.
+  \item Maintain recency with a doubly-linked list (\texttt{std::list<pair<key,value>>}); front = most recent, back = least recent. Given an iterator, \texttt{splice} and removals are constant time.
+\end{itemize}
+This combination minimizes per-operation cost while keeping implementation straightforward and memory usage proportional to capacity.
+
+\subsection{Scheduler — algorithmic pattern}
+\begin{itemize}
+  \item \texttt{can\_attend\_all}: sort intervals by start time and check for any start $<$ previous end (strict overlap). Sorting yields \(O(n\log n)\).
+  \item \texttt{min\_rooms\_required}: sort by start times, sweep using a min-heap of end times: for each event, free all rooms whose end $\le$ start, then reserve a room (push end). The maximum heap size observed is the required room count — optimal and runs in \(O(n\log n)\).
+  \item \texttt{assignRooms}: extend the above by maintaining room ids; reuse freed room ids via a small free-pool (min-heap) so produced ids are compact.
+\end{itemize}
+
+\section{Algorithms (high-level pseudocode)}
+\subsection{LRU cache}
+\begin{tcolorbox}[mybox,title=LRU operations (pseudocode)]
+\small
+\textbf{get(key)}:
+\begin{enumerate}
+  \item Lookup node = map[key]. If missing return -1.
+  \item Move node to front of list (most recent).
+  \item Return node.value.
+\end{enumerate}
+
+\textbf{put(key, value)}:
+\begin{enumerate}
+  \item If key exists: update value, move node to front, return.
+  \item If size == capacity: evict node at back (remove from list and map).
+  \item Insert new node at front and add map[key] = iterator.
+\end{enumerate}
+\end{tcolorbox}
+
+\subsection{Scheduler (min rooms)}
+\begin{tcolorbox}[mybox,title=Interval partitioning (pseudocode)]
+\small
+\begin{enumerate}
+  \item Sort events by start time.
+  \item Initialize empty min-heap of end times.
+  \item For each event (s,e):
+    \begin{itemize}
+      \item While heap not empty and heap.top() $\le$ s: pop() (room freed).
+      \item push(e) (occupy a room until e).
+      \item track max heap size.
+    \end{itemize}
+  \item Return tracked max size.
+\end{enumerate}
+\end{tcolorbox}
+
+\section{Complexity summary}
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Function & Time complexity & Space complexity \\ \midrule
+LRU \texttt{get} & \(O(1)\) & \(O(1)\) (per op) \\
+LRU \texttt{put} & \(O(1)\) amortized & \(O(1)\) (per op) \\
+Scheduler: sort step & \(O(n\log n)\) & \(O(n)\) \\
+Scheduler: sweep/heap step & \(O(n\log n)\) total & \(O(n)\) \\ \bottomrule
+\end{tabular}
+\caption{Asymptotic bounds; \(n\) = number of events.}
+\end{table}
+
+\section{Correctness sketch}
+\subsection{LRU}
+The map ensures exact presence checks and constant-time access; moving nodes to the front on access/update preserves recency ordering. Eviction removes the list's back element, which by construction is the least recently used.
+
+\subsection{Scheduler}
+The heap-based greedy is the standard interval partitioning solution: whenever an event starts, any room with end $\le$ start is reusable; if none exist, a new room is required. The algorithm produces the interval depth (maximum concurrency), which equals the minimum number of rooms necessary.
+
+\section{Practical notes and trade-offs}
+\begin{itemize}
+  \item \textbf{Memory vs speed:} the LRU approach uses per-entry pointers (list nodes) plus hash entries — modest overhead in exchange for \(O(1)\) operations.
+  \item \textbf{Alternatives:} language built-ins (Python's \texttt{OrderedDict}) or specialized caches (LRU-K, 2Q) can be used where workload characteristics demand them.
+  \item \textbf{Concurrency:} for thread-safety, wrap public operations in a mutex (coarse-grained). For higher throughput, consider lock striping or established concurrent collections.
+\end{itemize}
+
+\section{Build, test and run}
+\begin{tcolorbox}[mybox]
+\textbf{Compile:}
+\begin{verbatim}
+g++ -std=c++17 main.cpp -O2 -o assignment
+\end{verbatim}
+\textbf{Run:}
+\begin{verbatim}
+./assignment
+\end{verbatim}
+\end{tcolorbox}
+
+\section{Representative test cases}
+\begin{itemize}
+  \item LRU: insert up to capacity, access older keys to change recency, insert new key to force eviction; assert evicted key is LRU.
+  \item Scheduler:
+    \begin{itemize}
+      \item Non-overlapping adjacent intervals: \((9,10),(10,11)\) $\Rightarrow$ can attend all, rooms = 1.
+      \item Overlap: \((9,11),(10,12)\) $\Rightarrow$ cannot attend all, rooms = 2.
+      \item Mixed: \((9,10),(9,11),(10,11)\) $\Rightarrow$ rooms = 2.
+    \end{itemize}
+\end{itemize}
+
+\newpage
+\section*{Appendices}
+\addcontentsline{toc}{section}{Appendices}
+
+\subsection*{Appendix A — C++: LRU cache}
+\addcontentsline{toc}{subsection}{Appendix A — LRU cache}
+\lstinputlisting[language=C++,caption={lru\_cache.hpp — unordered\_map + std::list implementation}]{lru_cache.hpp}
+
+\subsection*{Appendix B — C++: Scheduler}
+\addcontentsline{toc}{subsection}{Appendix B — Scheduler}
+\lstinputlisting[language=C++,caption={scheduler.hpp — canAttendAll, minRoomsRequired, assignRooms}]{scheduler.hpp}
+
+\subsection*{Appendix C — C++: Example main}
+\addcontentsline{toc}{subsection}{Appendix C — Example main}
+\lstinputlisting[language=C++,caption={main.cpp — minimal test harness}]{main.cpp}
+
+\section*{References}
+\begin{enumerate}[leftmargin=*]
+  \item E. O'Neil, P. O'Neil, G. Weikum. \textit{The LRU-K Page Replacement Algorithm for Database Disk Buffering}, SIGMOD, 1993.
+  \item T. Johnson, D. Shasha. \textit{2Q: A Low Overhead High Performance Buffer Management Replacement Algorithm}, VLDB, 1994.
+  \item J. Kleinberg, É. Tardos. \textit{Algorithm Design}, Interval partitioning (lecture notes).
+  \item Recent surveys on learned cache replacement (arXiv/conference literature, 2021–2024).
+\end{enumerate}
+
+
+
+\end{document}
